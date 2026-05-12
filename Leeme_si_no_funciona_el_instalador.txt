@@ -1,0 +1,17 @@
+Si el instalador no funciona, haz esto manualmente:
+
+1. Presiona Windows + R, escribe %appdata% y pulsa Enter.
+2. Abre la carpeta .minecraft
+3. Dentro de .minecraft, coloca los archivos así:
+
+   • La carpeta "mods" → pégala en .minecraft
+     (Si ya existe una carpeta mods, borra su contenido antes)
+
+   • La carpeta "defaultoptions" → pégala DENTRO de .minecraft/config
+     (Si no existe la carpeta config, créala)
+
+   • El archivo "mine_and_slash-client.toml" → pégalo también en .minecraft/config
+
+   Sobrescribe todo si te pregunta.
+
+Listo, abre el launcher con Forge y juega.
