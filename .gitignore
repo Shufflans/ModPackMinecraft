@@ -5,4 +5,7 @@ build/
 dist/
 *.spec
 .venv/
+*.nuevo
+*.bat
+*.old
 " | Out-File -FilePath .gitignore -Encoding utf8
