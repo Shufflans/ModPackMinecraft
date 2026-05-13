@@ -41,7 +41,7 @@ ELEMENTOS = [
 ]
 
 # ----- NUEVO: Versión para auto‑update (debe coincidir con el tag del Release) -----
-VERSION_ACTUAL = "v1.0.0"
+VERSION_ACTUAL = "v1.0.1"
 REPO_API_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 # -----------------------------------------------------------------------------------
 
