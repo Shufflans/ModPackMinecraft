@@ -10,17 +10,23 @@ import time
 import json
 import urllib.request
 import subprocess
+import re   
 
-# ---------- CONFIGURACIÓN ----------
 GITHUB_USER = "Shufflans"
 GITHUB_REPO = "ModPackMinecraft"
 GITHUB_BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}"
 
-# ----- NUEVO: Carpeta por defecto (se puede cambiar desde la interfaz) -----
 MC_DIR_DEFAULT = os.path.join(os.getenv('APPDATA'), '.minecraft')
 MC_DIR = MC_DIR_DEFAULT
-# -------------------------------------------------------------------------
+
+VERSION_ACTUAL = "v1.0.2"   
+REPO_API_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
+
+
+FORGE_VERSION_DIR = "1.20.1-forge-47.4.20"         
+FORGE_INSTALLER_URL = f"{RAW_BASE}/tools/forge-1.20.1-47.4.20-installer.jar"
+
 
 ELEMENTOS = [
     {
@@ -40,14 +46,6 @@ ELEMENTOS = [
     }
 ]
 
-# ----- NUEVO: Versión para auto‑update (debe coincidir con el tag del Release) -----
-VERSION_ACTUAL = "v1.0.1"
-REPO_API_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
-# -----------------------------------------------------------------------------------
-
-# -----------------------------------
-# Funciones de sincronización (SE MANTIENEN IGUAL, solo unifico obtener_arbol_github)
-# -----------------------------------
 def git_blob_sha1(filepath):
     with open(filepath, 'rb') as f:
         contenido = f.read()
@@ -73,11 +71,6 @@ def descargar_archivo(url, destino):
             time.sleep(0.5)
 
 def obtener_arbol_github(carpeta):
-    """
-    Devuelve un diccionario {ruta_relativa: sha_blob} de todos los archivos
-    dentro de la carpeta especificada, usando el árbol Git recursivo.
-    Para la carpeta 'mods' solo incluye extensiones válidas.
-    """
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/git/trees/{GITHUB_BRANCH}?recursive=1"
     resp = requests.get(url)
     resp.raise_for_status()
@@ -92,7 +85,6 @@ def obtener_arbol_github(carpeta):
     for item in data['tree']:
         if item['type'] == 'blob' and item['path'].startswith(prefijo):
             rel_path = item['path'][len(prefijo):]
-            # Si es la carpeta mods, filtrar por extensión; si es config, aceptar todo
             if carpeta == "mods":
                 if any(rel_path.endswith(ext) for ext in extensiones_validas):
                     archivos[rel_path] = item['sha']
@@ -209,9 +201,7 @@ def instalar():
     finally:
         btn_sinc['state'] = 'normal'
 
-# ----- NUEVO: Funciones de auto‑update y selector de carpeta -----
 def buscar_actualizacion():
-    """Devuelve url_descarga si hay un release más nuevo que VERSION_ACTUAL."""
     try:
         with urllib.request.urlopen(REPO_API_URL) as resp:
             data = json.loads(resp.read().decode())
@@ -224,7 +214,6 @@ def buscar_actualizacion():
             if not url_descarga:
                 return None
 
-            # Comparar versiones ignorando la 'v' inicial
             def version_a_tupla(v):
                 return tuple(int(x) for x in v.lstrip('v').split('.'))
             if version_a_tupla(tag_remoto) > version_a_tupla(VERSION_ACTUAL):
@@ -234,7 +223,6 @@ def buscar_actualizacion():
         return None
 
 def actualizar_exe(url_descarga):
-    """Descarga el nuevo .exe, crea un .bat para reemplazarse y cierra."""
     if not messagebox.askyesno("Actualización disponible",
                                "Hay una nueva versión del launcher.\n¿Quieres actualizar ahora?"):
         return
@@ -268,8 +256,7 @@ del /f /q "{ruta_bat}"
     sys.exit()
 
 def seleccionar_carpeta():
-    """Abre diálogo para elegir carpeta, empezando en %APPDATA%."""
-    inicio = os.getenv('APPDATA')  # Siempre abre en Roaming
+    inicio = os.getenv('APPDATA')
     carpeta = filedialog.askdirectory(
         title="Selecciona la carpeta .minecraft",
         initialdir=inicio
@@ -277,29 +264,92 @@ def seleccionar_carpeta():
     if carpeta:
         dir_var.set(carpeta)
         actualizar_destinos(carpeta)
+        verificar_forge()  
 
 def actualizar_destinos(carpeta_base):
-    """Reconstruye ELEMENTOS con la nueva carpeta base."""
     global MC_DIR, ELEMENTOS
     MC_DIR = carpeta_base
     ELEMENTOS[0]["destino"] = os.path.join(MC_DIR, "config", "mine_and_slash-client.toml")
     ELEMENTOS[1]["destino"] = os.path.join(MC_DIR, "config", "defaultoptions")
     ELEMENTOS[2]["destino"] = os.path.join(MC_DIR, "mods")
-# ----------------------------------------------------------------
 
-# ---------- Interfaz ----------
+def java_version_ok():
+    """Verifica que Java 17 o superior esté disponible."""
+    try:
+        result = subprocess.run(
+            ["java", "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True, check=False
+        )
+        output = result.stdout + result.stderr
+        match = re.search(r'version\s+"?(\d+)', output)
+        if match:
+            return int(match.group(1)) >= 17
+    except FileNotFoundError:
+        pass
+    return False
+
+def forge_instalado():
+    """Devuelve True si la carpeta de la versión de Forge existe."""
+    version_dir = os.path.join(MC_DIR, "versions", FORGE_VERSION_DIR)
+    return os.path.isdir(version_dir)
+
+def verificar_forge():
+    """Actualiza el botón y la etiqueta según si Forge está presente."""
+    if forge_instalado():
+        btn_forge.pack_forget()
+        lbl_forge_estado.config(text="✅ Forge ya está instalado", fg="green")
+    else:
+        lbl_forge_estado.config(text="Forge no detectado", fg="red")
+        btn_forge.pack(pady=2)
+
+def instalar_forge():
+    """Descarga y ejecuta el instalador de Forge."""
+    if not java_version_ok():
+        if messagebox.askyesno(
+            "Java 17 requerido",
+            "Se necesita Java 17 o superior.\n¿Abrir página de descarga?"
+        ):
+            import webbrowser
+            webbrowser.open("https://adoptium.net/download/")
+        return
+
+    ruta_temp = os.path.join(os.environ['TEMP'], "forge-installer.jar")
+    lbl_estado.config(text="Descargando instalador de Forge...")
+    ventana.update()
+    try:
+        urllib.request.urlretrieve(FORGE_INSTALLER_URL, ruta_temp)
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo descargar el instalador de Forge:\n{e}")
+        return
+
+    lbl_estado.config(text="Instalando Forge (puede tardar un momento)...")
+    ventana.update()
+    try:
+        subprocess.run(
+            ["java", "-jar", ruta_temp, "--installClient", "--installDir", MC_DIR],
+            check=True
+        )
+        messagebox.showinfo("Éxito", "Forge se ha instalado correctamente.")
+        verificar_forge()
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("Error", f"Falló la instalación de Forge:\n{e}")
+    finally:
+        lbl_estado.config(text="")
+        if os.path.exists(ruta_temp):
+            os.remove(ruta_temp)
+
 ventana = tk.Tk()
 ventana.title("Sincronizador de Modpack")
-ventana.geometry("600x250")
+ventana.geometry("600x320")  
 ventana.resizable(False, False)
 
 tk.Label(ventana, text="Sincronizador de mods y configuración",
          font=("Arial", 12, "bold")).pack(pady=10)
 
-# --- Nuevo: Selector de carpeta ---
 frame_dir = tk.Frame(ventana)
 frame_dir.pack(pady=5, padx=10, fill='x')
-
 tk.Label(frame_dir, text="Carpeta Minecraft:").pack(anchor='w')
 
 combo_frame = tk.Frame(frame_dir)
@@ -308,20 +358,15 @@ combo_frame.pack(fill='x', pady=2)
 dir_var = tk.StringVar(value=MC_DIR)
 combo = ttk.Combobox(combo_frame, textvariable=dir_var, width=50)
 combo.pack(side=tk.LEFT, expand=True, fill='x')
-# Inicialmente solo mostramos la ruta por defecto
 combo['values'] = [MC_DIR_DEFAULT]
 
 btn_examinar = tk.Button(combo_frame, text="Examinar", command=seleccionar_carpeta, width=10)
 btn_examinar.pack(side=tk.LEFT, padx=5)
 
-# Al cambiar el texto del Combobox (por ejemplo, después de usar Examinar),
-# actualizamos las rutas de destino
 def on_dir_change(event):
     actualizar_destinos(dir_var.get())
+    verificar_forge()
 combo.bind('<<ComboboxSelected>>', on_dir_change)
-# También podemos forzar la actualización si el usuario escribe manualmente (opcional)
-# combo.bind('<Return>', on_dir_change)
-# ------------------------------------
 
 btn_sinc = tk.Button(ventana, text="Sincronizar ahora",
                      command=lambda: threading.Thread(target=instalar).start(),
@@ -334,7 +379,17 @@ barra.pack(pady=5)
 lbl_estado = tk.Label(ventana, text="", fg="blue")
 lbl_estado.pack()
 
-# ----- Verificar actualización SOLO si estamos en un .exe compilado -----
+frame_forge = tk.Frame(ventana)
+frame_forge.pack(pady=5)
+
+lbl_forge_estado = tk.Label(frame_forge, text="", font=("Arial", 9))
+lbl_forge_estado.pack()
+
+btn_forge = tk.Button(frame_forge, text="Instalar Forge",
+                      command=lambda: threading.Thread(target=instalar_forge).start(),
+                      bg="#2196F3", fg="white", font=("Arial", 9, "bold"), width=15)
+verificar_forge()
+
 if getattr(sys, 'frozen', False):
     url_update = buscar_actualizacion()
     if url_update:
